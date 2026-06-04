@@ -1,0 +1,6 @@
+numpy
+pandas
+scipy
+pydantic
+rich
+tqdm

@@ -1,0 +1,107 @@
+"""Synthetic data generation for postureopt."""
+from __future__ import annotations
+
+import copy
+import random
+from typing import List
+
+from .core import (
+    AssetType, SustainmentAction, Location, Asset, PostureState,
+    ReplenishmentPolicy,
+)
+
+THEATER_LOCATIONS: List[dict] = [
+    {"name": "Kadena AB", "lat": 26.35, "lon": 127.77, "strategic_value": 0.95},
+    {"name": "Andersen AFB", "lat": 13.58, "lon": 144.93, "strategic_value": 0.90},
+    {"name": "MCAS Iwakuni", "lat": 34.14, "lon": 132.24, "strategic_value": 0.85},
+    {"name": "Camp H.M. Smith", "lat": 21.41, "lon": -157.93, "strategic_value": 0.80},
+    {"name": "Diego Garcia", "lat": -7.32, "lon": 72.42, "strategic_value": 0.78},
+    {"name": "Misawa AB", "lat": 40.70, "lon": 141.37, "strategic_value": 0.75},
+    {"name": "Osan AB", "lat": 37.09, "lon": 127.03, "strategic_value": 0.88},
+    {"name": "Clark AB", "lat": 15.19, "lon": 120.56, "strategic_value": 0.72},
+]
+
+
+def make_location(i: int = 0) -> Location:
+    d = THEATER_LOCATIONS[i % len(THEATER_LOCATIONS)]
+    return Location(
+        location_id=f"L{i:03d}",
+        name=d["name"],
+        lat=d["lat"],
+        lon=d["lon"],
+        capacity=20,
+        strategic_value=d["strategic_value"],
+    )
+
+
+def make_asset(
+    asset_type: AssetType = AssetType.AIRCRAFT,
+    location_id: str = "L001",
+    readiness: float = 0.85,
+    seed: int = 42,
+) -> Asset:
+    rng = random.Random(seed)
+    return Asset(
+        asset_id=f"asset_{rng.randint(1000,9999)}",
+        asset_type=asset_type,
+        location_id=location_id,
+        quantity=rng.randint(2, 10),
+        readiness_rate=min(max(readiness, 0.0), 1.0),
+        maintenance_days_remaining=rng.randint(5, 60),
+    )
+
+
+def make_posture_state(n_assets: int = 20, seed: int = 42) -> PostureState:
+    rng = random.Random(seed)
+    locations = [make_location(i) for i in range(5)]
+    assets = []
+    asset_types = list(AssetType)
+    for i in range(n_assets):
+        loc = rng.choice(locations)
+        atype = rng.choice(asset_types)
+        assets.append(Asset(
+            asset_id=f"A{i:04d}",
+            asset_type=atype,
+            location_id=loc.location_id,
+            quantity=rng.randint(1, 10),
+            readiness_rate=round(rng.uniform(0.4, 1.0), 3),
+            maintenance_days_remaining=rng.randint(1, 90),
+        ))
+    return PostureState(assets=assets, locations=locations, time_step=0)
+
+
+def simulate_degradation(
+    state: PostureState, n_steps: int = 5, seed: int = 42
+) -> List[PostureState]:
+    """Simulate asset degradation + replenishment over time steps."""
+    rng = random.Random(seed)
+    policy = ReplenishmentPolicy()
+    history = []
+    current = copy.deepcopy(state)
+    for step in range(n_steps):
+        new_assets = []
+        for asset in current.assets:
+            degradation = rng.uniform(0.05, 0.15)
+            new_readiness = max(0.0, asset.readiness_rate - degradation)
+            new_days = max(0, asset.maintenance_days_remaining - 1)
+            a = Asset(
+                asset_id=asset.asset_id,
+                asset_type=asset.asset_type,
+                location_id=asset.location_id,
+                quantity=asset.quantity,
+                readiness_rate=round(new_readiness, 4),
+                maintenance_days_remaining=new_days,
+            )
+            action = policy.decide(a)
+            if action == SustainmentAction.MAINTAIN:
+                a.readiness_rate = min(1.0, a.readiness_rate + 0.2)
+            elif action == SustainmentAction.RESUPPLY:
+                a.quantity += 2
+            new_assets.append(a)
+        current = PostureState(
+            assets=new_assets,
+            locations=current.locations,
+            time_step=step + 1,
+        )
+        history.append(copy.deepcopy(current))
+    return history
