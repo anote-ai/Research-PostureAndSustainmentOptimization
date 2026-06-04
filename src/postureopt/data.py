@@ -2,12 +2,20 @@
 from __future__ import annotations
 
 import copy
+import math
 import random
 from typing import List
 
 from .core import (
-    AssetType, SustainmentAction, Location, Asset, PostureState,
+    Asset,
+    AssetType,
+    Location,
+    PostureState,
     ReplenishmentPolicy,
+    ResourceProfile,
+    SLATarget,
+    SustainmentAction,
+    TelemetrySnapshot,
 )
 
 THEATER_LOCATIONS: List[dict] = [
@@ -19,6 +27,16 @@ THEATER_LOCATIONS: List[dict] = [
     {"name": "Misawa AB", "lat": 40.70, "lon": 141.37, "strategic_value": 0.75},
     {"name": "Osan AB", "lat": 37.09, "lon": 127.03, "strategic_value": 0.88},
     {"name": "Clark AB", "lat": 15.19, "lon": 120.56, "strategic_value": 0.72},
+]
+
+# Realistic cloud instance profiles
+INSTANCE_PROFILES: List[dict] = [
+    {"profile_id": "c5.xlarge", "cpu_cores": 4, "memory_gb": 8.0, "gpu_count": 0, "hourly_cost_usd": 0.17},
+    {"profile_id": "c5.4xlarge", "cpu_cores": 16, "memory_gb": 32.0, "gpu_count": 0, "hourly_cost_usd": 0.68},
+    {"profile_id": "p3.2xlarge", "cpu_cores": 8, "memory_gb": 61.0, "gpu_count": 1, "hourly_cost_usd": 3.06},
+    {"profile_id": "p3.8xlarge", "cpu_cores": 32, "memory_gb": 244.0, "gpu_count": 4, "hourly_cost_usd": 12.24},
+    {"profile_id": "g4dn.xlarge", "cpu_cores": 4, "memory_gb": 16.0, "gpu_count": 1, "hourly_cost_usd": 0.526},
+    {"profile_id": "g4dn.12xlarge", "cpu_cores": 48, "memory_gb": 192.0, "gpu_count": 4, "hourly_cost_usd": 3.912},
 ]
 
 
@@ -105,3 +123,76 @@ def simulate_degradation(
         )
         history.append(copy.deepcopy(current))
     return history
+
+
+# ---------------------------------------------------------------------------
+# Infrastructure telemetry generation
+# ---------------------------------------------------------------------------
+
+
+def make_resource_profile(idx: int = 0) -> ResourceProfile:
+    """Return a ResourceProfile from the standard instance catalogue."""
+    d = INSTANCE_PROFILES[idx % len(INSTANCE_PROFILES)]
+    return ResourceProfile(**d)
+
+
+def make_all_resource_profiles() -> List[ResourceProfile]:
+    """Return all catalogued resource profiles."""
+    return [ResourceProfile(**d) for d in INSTANCE_PROFILES]
+
+
+def make_sla_target(
+    max_latency_ms: float = 200.0,
+    min_availability: float = 0.999,
+    max_error_rate: float = 0.01,
+    cost_per_hour_usd: float = 5.0,
+) -> SLATarget:
+    return SLATarget(
+        sla_id="default-sla",
+        max_latency_ms=max_latency_ms,
+        min_availability=min_availability,
+        max_error_rate=max_error_rate,
+        cost_per_hour_usd=cost_per_hour_usd,
+    )
+
+
+def make_telemetry_snapshot(seed: int = 42, load_factor: float = 0.5) -> TelemetrySnapshot:
+    """Generate a single telemetry snapshot at a given load factor."""
+    rng = random.Random(seed)
+    # Higher load => higher latency, error rate, and cost
+    base_latency = 20.0 + load_factor * 400.0
+    jitter = rng.uniform(-10.0, 10.0)
+    return TelemetrySnapshot(
+        snapshot_id=f"snap-{rng.randint(1000, 9999)}",
+        timestamp_s=rng.uniform(0, 3600),
+        p99_latency_ms=max(10.0, base_latency + jitter),
+        availability=max(0.90, min(1.0, 1.0 - load_factor * 0.01 + rng.uniform(-0.001, 0.001))),
+        error_rate=max(0.0, min(1.0, load_factor * 0.02 + rng.uniform(0.0, 0.005))),
+        cpu_utilization=round(min(0.99, load_factor + rng.uniform(-0.05, 0.05)), 3),
+        memory_utilization=round(min(0.99, load_factor * 0.8 + rng.uniform(-0.05, 0.05)), 3),
+        gpu_utilization=round(min(0.99, load_factor * 0.6 + rng.uniform(-0.05, 0.05)), 3),
+        cost_per_hour_usd=round(1.0 + load_factor * 8.0 + rng.uniform(-0.5, 0.5), 2),
+        requests_per_second=round(load_factor * 500.0 + rng.uniform(-10.0, 10.0), 1),
+    )
+
+
+def make_telemetry_series(
+    n_snapshots: int = 24,
+    seed: int = 42,
+    diurnal: bool = True,
+) -> List[TelemetrySnapshot]:
+    """Generate a time-series of telemetry snapshots.
+
+    When diurnal=True, load follows a sinusoidal pattern simulating day/night cycles.
+    """
+    rng = random.Random(seed)
+    snapshots: List[TelemetrySnapshot] = []
+    for i in range(n_snapshots):
+        if diurnal:
+            # Peak load at step n/2
+            load_factor = 0.3 + 0.5 * math.sin(math.pi * i / max(n_snapshots - 1, 1))
+        else:
+            load_factor = rng.uniform(0.2, 0.9)
+        snap = make_telemetry_snapshot(seed=rng.randint(0, 99999), load_factor=load_factor)
+        snapshots.append(snap)
+    return snapshots
