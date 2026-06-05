@@ -2,6 +2,8 @@
 
 **Anote, Inc. | Defense Analytics Research**
 
+We propose a greedy placement and reinforcement learning framework for optimizing joint force sustainment scheduling across distributed theater locations, maximizing readiness coverage while minimizing logistics cost under stochastic asset degradation.
+
 ---
 
 ## Problem Context (DASH-5)
