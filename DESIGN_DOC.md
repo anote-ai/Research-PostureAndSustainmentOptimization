@@ -1,77 +1,286 @@
-# PostureAndSustainmentOptimization — Research Design Document
+# Research Design Document: Posture and Sustainment Optimization
 
-## Goal
+## Vision Statement
 
-Develop and evaluate a distributionally robust optimization framework for joint force posture and sustainment planning in contested (A2/AD) environments — demonstrating that robust solutions outperform deterministic baselines on out-of-sample scenarios, and that deep RL can solve the recourse problem faster than branch-and-bound at operational scale.
+Deliver the first rigorous comparison of **robust optimization, stochastic programming, and reinforcement learning** for military posture and sustainment decisions under deep uncertainty — proving that distributionally robust stochastic programming (DRSP) outperforms standard linear programming by ≥20% on out-of-sample scenarios while remaining computationally tractable for operational planning timelines, and establishing **SustainBench** as the standard evaluation framework for AI-driven posture optimization.
 
-## Objective
+---
 
-1. Formulate the force posture problem as a two-stage distributionally robust stochastic program (DRSP) with adversarial interdiction of sustainment routes
-2. Implement and compare 3 solution approaches: deterministic LP, stochastic programming, and DRSP + RL recourse
-3. Demonstrate on publicly-available synthetic theater scenarios that DRSP produces better worst-case performance and out-of-sample robustness than deterministic planning
+## Problem Statement & Novelty
 
-## Background / Motivation
+Military posture and sustainment optimization involves deciding: where to pre-position assets, how much stock to hold, which supply routes to use, and how to adapt when plans encounter reality. Current practice relies on:
 
-Force posture decisions are made under deep uncertainty about adversary behavior, weather, and terrain access. Current planning tools use deterministic optimization (optimize against a single "most likely" scenario) or simple stochastic programming. Neither is robust to adversarial scenario selection — a sophisticated adversary will probe exactly the scenarios the plan is weakest against.
+1. **Deterministic LP models**: Optimize for a single expected scenario, fragile under uncertainty.
+2. **Manual scenario analysis**: Planners manually consider 3–5 scenarios; computationally infeasible to explore large uncertainty spaces.
+3. **No reinforcement learning comparison**: RL for logistics/sustainment is studied in isolation but never rigorously compared to classical stochastic programming.
+4. **No recourse policy evaluation**: Plans must have recourse actions (what to do when the plan fails); existing benchmarks don't evaluate recourse quality.
 
-Distributionally robust optimization (DRO) explicitly hedges against the worst case over a family of plausible distributions — the right model for contested-environment planning.
+### Novel Contributions
+
+| Contribution | Description |
+|---|---|
+| **SustainBench** | 200 posture/sustainment scenarios with parameterized uncertainty, cost functions, and recourse actions |
+| **ROE metric** | Robustness-Optimality Efficiency: Pareto score of out-of-sample cost vs. worst-case cost |
+| **DRSP framework** | Distributionally robust stochastic programming for posture optimization |
+| **RL recourse policy** | Trained RL agent for adaptive recourse decisions |
+| **Out-of-sample evaluation protocol** | First systematic OOS evaluation framework for military OR models |
+
+### Key Metrics
+
+```
+ROE = (1 / cost_ratio) × robustness_score
+
+where:
+  cost_ratio = out_of_sample_cost / optimal_hindsight_cost  (lower is better)
+  robustness_score = 1 - worst_case_regret / max_possible_regret  (higher is better)
+
+Out-of-sample evaluation:
+  Train on scenario distribution Θ_train
+  Evaluate on held-out Θ_test (adversarially chosen)
+  Report: mean cost, 95th percentile cost, worst-case cost
+```
+
+---
+
+## Research Objectives
+
+1. Demonstrate that **DRSP** achieves ≥20% lower out-of-sample cost vs. deterministic LP across SustainBench scenarios.
+2. Show that **SAA (Sample Average Approximation)** is competitive with DRSP at high sample counts but deteriorates faster under distribution shift.
+3. Evaluate **RL recourse policies**: do RL agents make better adaptive decisions than rule-based recourse?
+4. Characterize the **computation-quality tradeoff**: at what problem size does DRSP become computationally infeasible for operational timelines?
+5. Identify **scenario types** where each method excels, providing a decision framework for method selection.
+
+---
+
+## Dataset Construction (SustainBench)
+
+### Scenario Categories (200 scenarios)
+
+| Category | Count | Key Uncertainties | Decision Variables |
+|---|---|---|---|
+| Humanitarian assistance | 40 | Demand surge, access denial | Pre-positioning, route selection |
+| Logistics sustainment | 50 | Supply disruption, transit delays | Stock levels, replenishment timing |
+| Force posture (joint) | 40 | Threat activation, force requirements | Asset placement, basing |
+| Disaster response | 35 | Disaster magnitude, affected population | Resource allocation, staging |
+| Multi-echelon supply | 35 | Lead times, demand variability | Inventory policy, supplier selection |
+
+### Uncertainty Parameterization
+
+```python
+# Scenario uncertainty structure
+class SustainScenario:
+    def __init__(self):
+        self.nominal_demand = ...  # Baseline demand vector
+        self.uncertainty_set = UncertaintySet(
+            type='ellipsoidal',  # or 'box', 'data-driven'
+            parameters={'radius': 0.3, 'correlation': 0.6}
+        )
+        self.recourse_options = [...]  # Available adaptive actions
+        self.cost_function = ...  # Multi-objective (cost + readiness + risk)
+        self.planning_horizon = 30  # days
+        self.oos_test_scenarios = generate_adversarial_scenarios(n=100)
+```
+
+### Ground Truth and Evaluation
+- **Oracle solution**: Solved with perfect hindsight (lower bound on achievable cost)
+- **Out-of-sample test set**: 100 adversarially generated scenarios per category
+- **Human expert evaluation**: Operational planners rate solution feasibility and doctrinal compliance
+
+---
+
+## Methods Under Evaluation
+
+| Method | Type | Handles Uncertainty | Recourse | Scalability |
+|---|---|---|---|---|
+| Deterministic LP | Classical OR | No | None | Excellent |
+| SAA (2-stage) | Stochastic | Distributional | Fixed | Good |
+| DRSP (ours) | Robust stochastic | Distributional robust | Fixed | Good |
+| Robust LP (minimax) | Robust | Worst-case | None | Good |
+| RL (PPO) | Reinforcement learning | Implicit | Adaptive | Moderate |
+| DRSP + RL recourse | Hybrid | Distributional robust | Adaptive (RL) | Moderate |
+| Human expert | Manual | Heuristic | Expert | N/A |
+
+---
 
 ## Experimental Design
 
-### Baseline Experiment
+### Baseline Experiment (Experiment 0)
+**Protocol**: Deterministic LP on 40 humanitarian assistance scenarios. Compute mean cost, OOS cost ratio.
 
-**Solve 10 synthetic theater posture instances using deterministic LP (optimize against the mean scenario)**
+**Expected result**: OOS cost ratio ≈ 1.31 (31% above optimal hindsight). Establishes the cost of ignoring uncertainty.
 
-- Metric: total logistics cost; feasibility rate when scenarios other than the mean are realized
-- Purpose: establish the deterministic planning baseline and confirm that mean-scenario optimization is brittle
-- Expected result: deterministic solutions are infeasible or very costly on 30–50% of off-mean scenarios
+---
 
-### Test Experiment 1: DRSP vs. Stochastic Programming
+### Experiment 1: DRSP vs. SAA vs. LP (Core Comparison)
+**Hypothesis**: DRSP achieves ≥20% lower OOS mean cost vs. deterministic LP, and ≥8% lower 95th percentile cost vs. SAA.
 
-Solve 10 instances with 3 methods: (1) deterministic LP, (2) two-stage stochastic program with SAA (100 scenarios), (3) two-stage DRSP with Wasserstein-ball uncertainty set. Metrics: in-sample objective, out-of-sample worst-case cost (across 1000 held-out scenarios), solution time.
+**Protocol**:
+1. Run LP, SAA, Robust LP, DRSP on all 200 scenarios.
+2. Evaluate each solution on OOS test set (100 adversarial scenarios each).
+3. Compute: mean OOS cost, 95th percentile OOS cost, worst-case OOS cost, ROE.
+4. Statistical test: Wilcoxon signed-rank for DRSP vs. SAA.
 
-**Expected result:** DRSP produces 15–25% lower worst-case cost than SAA at 5–10% higher in-sample cost — the price of robustness
+**Expected results**:
 
-### Test Experiment 2: Deep RL for Recourse Decisions
+| Method | Mean OOS Cost Ratio | 95th Pctile Ratio | Worst Case Ratio | ROE |
+|---|---|---|---|---|
+| Deterministic LP | 1.31 | 1.62 | 2.41 | 0.48 |
+| SAA (2-stage) | 1.14 | 1.38 | 1.89 | 0.63 |
+| Robust LP | 1.09 | 1.21 | 1.44 | 0.71 |
+| DRSP (ours) | 1.07 | 1.18 | 1.39 | 0.76 |
 
-Train a deep RL agent to solve the recourse problem (real-time sustainment flow allocation). Compare RL vs. branch-and-bound on: solution quality (% of optimal), solution time (ms).
+- DRSP improvement over LP: (1.31 - 1.07) / 1.31 = 18% on mean cost, 27% on 95th percentile
+- DRSP vs. SAA: better on tail risk (18% lower 95th percentile) while comparable on mean cost
 
-**Expected result:** RL achieves 95%+ of B&B optimality in 100x less time — sufficient for operational real-time planning
+---
 
-### Test Experiment 3: Out-of-Sample Robustness Generalization
+### Experiment 2: RL Recourse Policy
+**Hypothesis**: RL recourse policy reduces adaptive recourse cost by ≥15% vs. rule-based recourse, at comparable computational overhead.
 
-Train/optimize all methods on distribution A; test on distribution B (different adversary strategy, different access constraints). Measure which method's solutions generalize best.
+**Protocol**:
+1. Train PPO agent on SustainBench training scenarios (recourse task only).
+2. Compare: (a) DRSP + rule-based recourse, (b) DRSP + RL recourse.
+3. Measure: recourse cost, constraint feasibility (does RL produce operationally feasible decisions?), training time.
 
-**Expected result:** DRSP + RL recourse outperforms both LP and SAA on out-of-sample robustness, especially under adversarially-selected scenarios
+**Expected results**:
+- Rule-based recourse cost: index 1.0 (baseline)
+- RL recourse cost: 0.84 (−16%)
+- Feasibility rate (RL): 91% (vs. 100% rule-based — RL sometimes violates doctrinal constraints)
+- Key finding: RL recourse needs constraint-aware training (constrained PPO) to match feasibility of rule-based
+- After constrained PPO: cost 0.87 (−13%), feasibility 97%
 
-## Expected Results
+```python
+# Constrained PPO for recourse
+class ConstrainedPPORecourse(PPO):
+    def compute_reward(self, state, action, next_state):
+        base_reward = -self.cost_function(state, action)
+        constraint_penalty = sum(
+            self.penalty_coeff * max(0, constraint(state, action))
+            for constraint in self.doctrinal_constraints
+        )
+        return base_reward - constraint_penalty
+```
 
-1. A publicly-available synthetic theater scenario generator and 20+ benchmark instances
-2. Comparison table: deterministic LP vs. SAA vs. DRSP on in-sample cost, worst-case cost, and solution time
-3. RL recourse policy: 95%+ of optimal quality in 100x less time than B&B
-4. **Key finding:** "Distributionally robust posture planning reduces worst-case sustainment cost by 20% vs. mean-scenario optimization — at only 8% in-sample cost premium"
-5. Practical recommendation: when to use DRSP vs. SAA, and when RL recourse is worth the training cost
+---
 
-## Why This Matters / Why People Would Care
+### Experiment 3: Computation-Quality Tradeoff
+**Hypothesis**: DRSP remains solvable within 4-hour planning timeline for scenarios up to 500 decision variables; SAA scales better but with lower OOS quality.
 
-- **Defense planners and combatant commands:** worst-case robustness improvement is directly operationally relevant
-- **RAND, CNA, and TRAC:** defense OR analysts will want to evaluate and extend this framework
-- **INFORMS/OR community:** DRSP with RL recourse is methodologically novel; logistics under adversarial disruption is broadly applicable
-- **Logistics AI broadly:** the methodology applies to supply chain optimization under adversarial disruption (port strikes, natural disasters)
+**Protocol**:
+1. Vary scenario complexity: 50, 100, 200, 500, 1000 decision variables.
+2. Measure solve time for LP, SAA, DRSP at each size.
+3. Plot: quality (ROE) vs. solve time for each method.
+
+**Expected results**:
+
+| Problem Size | LP Solve Time | SAA Solve Time | DRSP Solve Time | DRSP ROE |
+|---|---|---|---|---|
+| 50 vars | 2s | 45s | 3min | 0.78 |
+| 100 vars | 8s | 4min | 18min | 0.76 |
+| 200 vars | 45s | 20min | 2.1hr | 0.74 |
+| 500 vars | 8min | 2.5hr | >12hr | N/A |
+
+- DRSP feasibility limit: ~200 decision variables within 4-hour planning constraint
+- For larger problems: SAA is the recommended alternative
+- Operational recommendation: DRSP for strategic posture; SAA for tactical sustainment
+
+---
+
+### Experiment 4: Distribution Shift Robustness
+**Hypothesis**: DRSP degrades gracefully under distribution shift; SAA degrades sharply when test distribution differs from training distribution by >20% Wasserstein distance.
+
+**Protocol**:
+1. Train SAA and DRSP on nominal distributions.
+2. Evaluate on increasingly shifted test distributions (measure shift by Wasserstein distance).
+3. Compare degradation curves.
+
+**Expected results**:
+- At 0 shift: DRSP cost ratio 1.07, SAA 1.14 (SAA better on in-distribution)
+- At 20% shift: DRSP 1.12, SAA 1.28 (SAA degrades faster)
+- At 40% shift: DRSP 1.18, SAA 1.51
+- Key finding: DRSP's robustness guarantee provides 2× better distribution shift resistance than SAA
+
+---
+
+## Expected Results Summary
+
+| Metric | Deterministic LP | DRSP | Improvement |
+|---|---|---|---|
+| Mean OOS cost ratio | 1.31 | 1.07 | −18% |
+| 95th pctile OOS ratio | 1.62 | 1.18 | −27% |
+| ROE | 0.48 | 0.76 | +58% |
+| Max feasible problem size | Any | 200 vars / 4hr | Scalable for tactical |
+| Distribution shift robustness | Low | High | 2× better |
+
+**Primary claim**: Distributionally robust stochastic programming achieves 18–27% lower out-of-sample costs vs. deterministic LP while remaining tractable for scenarios with up to 200 decision variables, making it the recommended approach for strategic military posture optimization.
+
+---
+
+## Why This Matters
+
+**For researchers**: SustainBench provides the first rigorous OR benchmark for military posture optimization with proper OOS evaluation.
+
+**For DoD planners**: A 20% reduction in out-of-sample sustainment costs translates directly to readiness improvements or budget savings at operational scale.
+
+**For OR practitioners**: The computation-quality tradeoff analysis provides concrete guidance for method selection based on problem size and timeline constraints.
+
+---
+
+## Implementation Plan
+
+```
+research-postureandsustainmentoptimization/
+├── data/
+│   ├── scenarios/       # 200 SustainBench scenarios
+│   ├── oos_test/        # OOS adversarial test sets
+│   └── expert_eval/     # Human expert ratings
+├── solvers/
+│   ├── lp_baseline.py
+│   ├── saa.py
+│   ├── drsp.py          # Our DRSP framework
+│   ├── robust_lp.py
+│   └── rl_recourse.py   # Constrained PPO
+├── metrics/
+│   ├── roe.py
+│   └── oos_eval.py
+├── experiments/
+│   ├── exp0_baseline.py
+│   ├── exp1_core_comparison.py
+│   ├── exp2_rl_recourse.py
+│   ├── exp3_scalability.py
+│   └── exp4_distribution_shift.py
+```
+
+---
 
 ## Timeline
 
-| Month | Milestone |
-|---|---|
-| 1 | Problem formulation + scenario generator implementation |
-| 2 | Deterministic LP and SAA baselines |
-| 3 | DRSP implementation and comparison |
-| 4 | Deep RL recourse policy training + evaluation |
-| 5 | Out-of-sample robustness experiments + Monte Carlo CIs |
-| 6 | Submission to Operations Research (INFORMS) or MORS Symposium |
+| Phase | Duration | Deliverable |
+|---|---|---|
+| Scenario construction | 5 weeks | 200 SustainBench scenarios |
+| Solver implementation | 4 weeks | All methods implemented |
+| Experiments | 5 weeks | All results |
+| Expert evaluation | 2 weeks | Feasibility ratings |
+| Paper writing | 4 weeks | INFORMS/MORS submission |
+
+**Target venues**: INFORMS Operations Research, MORS Symposium, or Operations Research Letters
+
+---
+
+## Open Questions & Risks
+
+| Risk | Likelihood | Mitigation |
+|---|---|---|
+| DRSP solver convergence | Medium | Commercial solver (Gurobi) + CPLEX fallback |
+| RL constraint violations | High | Constrained PPO; projection layer |
+| Scenario realism validation | Medium | Expert review panel |
+| Computational cost at scale | High | Cloud HPC for large experiments |
+
+---
 
 ## Related Issues
 
-- Design doc GitHub issue: #19
-- Target conferences: see issues labeled `conference-prep`
-- Reproducibility package: see issues labeled `artifact-release`
+- COA Generation: posture decisions feed COA planning
+- DARPA LYFT: sustainment is a LYFT-relevant capability
+- Reproducibility: solver version pinning
+- Related work audit: two-stage stochastic programming, robust optimization literature
