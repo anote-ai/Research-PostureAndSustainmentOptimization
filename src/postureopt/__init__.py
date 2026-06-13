@@ -1,4 +1,11 @@
 """postureopt: Posture and sustainment optimization package."""
+from .drsp import (
+    ThreatScenario,
+    ScenarioSet,
+    CEVOptimizer,
+    AdversarialModel,
+    RobustCEVOptimizer,
+)
 from .core import (
     AssetType,
     SustainmentAction,
@@ -24,6 +31,11 @@ from .evaluate import (
 )
 
 __all__ = [
+    "ThreatScenario",
+    "ScenarioSet",
+    "CEVOptimizer",
+    "AdversarialModel",
+    "RobustCEVOptimizer",
     "AssetType",
     "SustainmentAction",
     "Location",
