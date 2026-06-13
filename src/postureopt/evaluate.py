@@ -48,7 +48,7 @@ def sustainment_cost(actions: List[SustainmentAction]) -> float:
 
 
 def posture_efficiency(readiness: float, coverage: float, cost: float) -> float:
-    """Composite efficiency metric."""
+    """(readiness * coverage) / log(2 + cost). Offset avoids division by zero when cost=0."""
     return (readiness * coverage) / math.log1p(cost + 1.0)
 
 
