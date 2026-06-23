@@ -213,6 +213,24 @@ class PostureOptimizer:
     def __init__(self, seed: int = 42) -> None:
         self.seed = seed
 
+    def random_placement(
+        self, assets: List[Asset], locations: List[Location]
+    ) -> Dict[str, str]:
+        """Assign each asset to a uniformly random location with remaining capacity."""
+        import random as _random
+        rng = _random.Random(self.seed)
+        capacity_remaining = {loc.location_id: loc.capacity for loc in locations}
+        loc_ids = [loc.location_id for loc in locations]
+        assignment: Dict[str, str] = {}
+        for asset in assets:
+            available = [l for l in loc_ids if capacity_remaining[l] > 0]
+            if not available:
+                break
+            chosen = rng.choice(available)
+            assignment[asset.asset_id] = chosen
+            capacity_remaining[chosen] -= 1
+        return assignment
+
     def greedy_placement(
         self, assets: List[Asset], locations: List[Location]
     ) -> Dict[str, str]:

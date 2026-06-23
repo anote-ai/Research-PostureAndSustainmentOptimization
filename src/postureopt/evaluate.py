@@ -52,6 +52,34 @@ def posture_efficiency(readiness: float, coverage: float, cost: float) -> float:
     return (readiness * coverage) / math.log1p(cost + 1.0)
 
 
+def scenario_weighted_readiness(
+    assets: List[Asset],
+    assignment: Dict[str, str],
+    threat_scenarios: List[Dict[str, float]],
+) -> float:
+    """Probability-weighted effective readiness under a set of threat scenarios.
+
+    Each scenario is a dict mapping location_id -> threat_level in [0, 1].
+    Effective readiness of an asset at a threatened location is discounted by
+    (1 - threat_level).  Scenarios are weighted uniformly.
+
+    SWR = mean_over_s( quantity_weighted_mean_over_a( r_a * (1 - tau_{loc_a}^s) ) )
+    """
+    if not assets or not threat_scenarios:
+        return 0.0
+    total_qty = sum(a.quantity for a in assets)
+    if total_qty == 0:
+        return 0.0
+    total = 0.0
+    for scenario in threat_scenarios:
+        effective = sum(
+            a.quantity * a.readiness_rate * (1.0 - scenario.get(assignment.get(a.asset_id, a.location_id), 0.0))
+            for a in assets
+        )
+        total += effective / total_qty
+    return total / len(threat_scenarios)
+
+
 def placement_quality(
     assignments: Dict[str, str],
     assets: List[Asset],

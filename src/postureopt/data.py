@@ -41,14 +41,14 @@ INSTANCE_PROFILES: List[dict] = [
 ]
 
 
-def make_location(i: int = 0) -> Location:
+def make_location(i: int = 0, capacity: int = 20) -> Location:
     d = THEATER_LOCATIONS[i % len(THEATER_LOCATIONS)]
     return Location(
         location_id=f"L{i:03d}",
         name=d["name"],
         lat=d["lat"],
         lon=d["lon"],
-        capacity=20,
+        capacity=capacity,
         strategic_value=d["strategic_value"],
     )
 
@@ -70,9 +70,9 @@ def make_asset(
     )
 
 
-def make_posture_state(n_assets: int = 20, seed: int = 42) -> PostureState:
+def make_posture_state(n_assets: int = 20, seed: int = 42, capacity: int = 20) -> PostureState:
     rng = random.Random(seed)
-    locations = [make_location(i) for i in range(5)]
+    locations = [make_location(i, capacity=capacity) for i in range(5)]
     assets = []
     asset_types = list(AssetType)
     for i in range(n_assets):
@@ -90,9 +90,17 @@ def make_posture_state(n_assets: int = 20, seed: int = 42) -> PostureState:
 
 
 def simulate_degradation(
-    state: PostureState, n_steps: int = 5, seed: int = 42
+    state: PostureState,
+    n_steps: int = 5,
+    seed: int = 42,
+    degradation_rate: float | None = None,
 ) -> List[PostureState]:
-    """Simulate asset degradation + replenishment over time steps."""
+    """Simulate asset degradation + replenishment over time steps.
+
+    degradation_rate: if set, applies a fixed delta each step instead of
+    the default stochastic U(0.05, 0.15) draw.  Used by Experiment 1 to
+    isolate placement policy effects from noise.
+    """
     rng = random.Random(seed)
     policy = ReplenishmentPolicy()
     history = []
@@ -100,7 +108,7 @@ def simulate_degradation(
     for step in range(n_steps):
         new_assets = []
         for asset in current.assets:
-            degradation = rng.uniform(0.05, 0.15)
+            degradation = degradation_rate if degradation_rate is not None else rng.uniform(0.05, 0.15)
             new_readiness = max(0.0, asset.readiness_rate - degradation)
             new_days = max(0, asset.maintenance_days_remaining - 1)
             a = Asset(
