@@ -17,6 +17,7 @@ from .core import (
     SustainmentAction,
     TelemetrySnapshot,
 )
+from .drsp import ScenarioSet, ThreatScenario
 
 THEATER_LOCATIONS: List[dict] = [
     {"name": "Kadena AB", "lat": 26.35, "lon": 127.77, "strategic_value": 0.95},
@@ -196,3 +197,104 @@ def make_telemetry_series(
         snap = make_telemetry_snapshot(seed=rng.randint(0, 99999), load_factor=load_factor)
         snapshots.append(snap)
     return snapshots
+
+
+# ---------------------------------------------------------------------------
+# Experiment 3 — scenario-set factories
+# ---------------------------------------------------------------------------
+
+def make_uniform_scenario_set(locations: List[Location], n_scenarios: int = 5) -> ScenarioSet:
+    """Uniform threat: all locations equally contested across all scenarios.
+
+    CEV and greedy should behave similarly here — used as a control condition.
+    """
+    loc_ids = [loc.location_id for loc in locations]
+    prob = 1.0 / n_scenarios
+    scenarios = [
+        ThreatScenario(
+            scenario_id=f"U{i}",
+            threat_weights={lid: round(0.1 + 0.1 * i / max(n_scenarios - 1, 1), 3) for lid in loc_ids},
+            probability=prob,
+        )
+        for i in range(n_scenarios)
+    ]
+    return ScenarioSet(scenarios=scenarios)
+
+
+def make_skewed_scenario_set(locations: List[Location]) -> ScenarioSet:
+    """High threat concentrated on the top-strategic-value location (80% weight).
+
+    Forces the optimizer away from the greedy-preferred location.
+    """
+    sorted_locs = sorted(locations, key=lambda l: -l.strategic_value)
+    top_id = sorted_locs[0].location_id
+    return ScenarioSet(scenarios=[
+        ThreatScenario(
+            scenario_id="SK_high",
+            threat_weights={top_id: 0.95},
+            probability=0.8,
+        ),
+        ThreatScenario(
+            scenario_id="SK_low",
+            threat_weights={lid: 0.05 for lid in (loc.location_id for loc in locations)},
+            probability=0.2,
+        ),
+    ])
+
+
+def make_adversarial_scenario_set(locations: List[Location]) -> ScenarioSet:
+    """Adversarially-shaped prior: threat is spread across top-two locations with
+    high demand multipliers, forcing the defender to hedge.
+    """
+    sorted_locs = sorted(locations, key=lambda l: -l.strategic_value)
+    top_id = sorted_locs[0].location_id
+    second_id = sorted_locs[1].location_id if len(sorted_locs) > 1 else top_id
+    return ScenarioSet(scenarios=[
+        ThreatScenario(
+            scenario_id="ADV_atk_top",
+            threat_weights={top_id: 0.90},
+            probability=0.4,
+            demand_multiplier=1.5,
+        ),
+        ThreatScenario(
+            scenario_id="ADV_atk_second",
+            threat_weights={second_id: 0.85},
+            probability=0.35,
+            demand_multiplier=1.3,
+        ),
+        ThreatScenario(
+            scenario_id="ADV_quiet",
+            threat_weights={lid: 0.05 for lid in (loc.location_id for loc in locations)},
+            probability=0.25,
+            demand_multiplier=1.0,
+        ),
+    ])
+
+
+def make_deceptive_scenario_set(locations: List[Location]) -> ScenarioSet:
+    """Deceptive prior that lures naive CEV into a vulnerable concentration.
+
+    The prior looks mostly safe (90% weight on a no-threat scenario), so naive CEV
+    piles assets at the top-strategic-value location.  The remaining 10% is a
+    high-intensity attack on exactly that location.  A rational adversary who
+    observes the resulting concentration immediately shifts all weight to the attack
+    scenario, collapsing naive efficiency.  Robust CEV iterates away from the lure.
+
+    This is the distribution that most clearly demonstrates the paper's core claim:
+    at high p_obs, naive CEV is exploitable; robust CEV maintains a higher floor.
+    """
+    sorted_locs = sorted(locations, key=lambda l: -l.strategic_value)
+    top_id = sorted_locs[0].location_id
+    return ScenarioSet(scenarios=[
+        ThreatScenario(
+            scenario_id="DEC_safe",
+            threat_weights={},
+            probability=0.95,
+        ),
+        ThreatScenario(
+            scenario_id="DEC_atk_top",
+            threat_weights={top_id: 0.99},
+            probability=0.05,
+            demand_multiplier=2.0,
+        ),
+    ])
