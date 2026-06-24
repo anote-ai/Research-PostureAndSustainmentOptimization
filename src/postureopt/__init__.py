@@ -8,12 +8,14 @@ from .core import (
     SLATarget,
     TelemetrySnapshot,
     ResourceProfile,
+    ThreatScenario,
     haversine_distance,
     estimated_latency_ms,
     estimated_hourly_cost,
     resource_utilization_score,
     ReplenishmentPolicy,
     PostureOptimizer,
+    ScenarioWeightedOptimizer,
 )
 from .evaluate import (
     sla_compliance_score,
@@ -21,6 +23,16 @@ from .evaluate import (
     sustainability_score,
     cost_latency_frontier,
     pareto_efficient_profiles,
+    scenario_weighted_readiness,
+    evss,
+)
+from .stats import (
+    confidence_interval,
+    ci_str,
+    ci_latex,
+    paired_ttest,
+    bonferroni_correct,
+    variance_decomposition,
 )
 
 __all__ = [
@@ -32,15 +44,25 @@ __all__ = [
     "SLATarget",
     "TelemetrySnapshot",
     "ResourceProfile",
+    "ThreatScenario",
     "haversine_distance",
     "estimated_latency_ms",
     "estimated_hourly_cost",
     "resource_utilization_score",
     "ReplenishmentPolicy",
     "PostureOptimizer",
+    "ScenarioWeightedOptimizer",
     "sla_compliance_score",
     "cost_efficiency_index",
     "sustainability_score",
     "cost_latency_frontier",
     "pareto_efficient_profiles",
+    "scenario_weighted_readiness",
+    "evss",
+    "confidence_interval",
+    "ci_str",
+    "ci_latex",
+    "paired_ttest",
+    "bonferroni_correct",
+    "variance_decomposition",
 ]

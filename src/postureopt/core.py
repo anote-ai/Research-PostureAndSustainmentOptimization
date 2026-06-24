@@ -234,3 +234,55 @@ class PostureOptimizer:
         """Apply ReplenishmentPolicy to all assets."""
         policy = ReplenishmentPolicy()
         return [(asset, policy.decide(asset)) for asset in state.assets]
+
+
+@dataclass
+class ThreatScenario:
+    """A single threat scenario: per-location threat levels and a probability weight."""
+
+    scenario_id: str
+    threat_levels: Dict[str, float]  # location_id -> threat in [0, 1]
+    weight: float = 1.0  # unnormalized; callers normalize across a scenario set
+
+
+class ScenarioWeightedOptimizer:
+    """Composite Expected Value (CEV) optimizer over a set of threat scenarios.
+
+    Assigns assets to maximize expected net strategic value, where each
+    location's value is discounted by the expected threat level across scenarios.
+    """
+
+    def __init__(self, seed: int = 42) -> None:
+        self.seed = seed
+
+    def _effective_value(self, loc: Location, scenarios: List[ThreatScenario]) -> float:
+        """Expected net strategic value: strategic_value * E[1 - threat_level]."""
+        total_weight = sum(s.weight for s in scenarios)
+        if total_weight == 0:
+            return loc.strategic_value
+        expected_survival = sum(
+            s.weight * (1.0 - s.threat_levels.get(loc.location_id, 0.0))
+            for s in scenarios
+        ) / total_weight
+        return loc.strategic_value * expected_survival
+
+    def optimize_placement(
+        self,
+        assets: List[Asset],
+        locations: List[Location],
+        scenarios: List[ThreatScenario],
+    ) -> Dict[str, str]:
+        """Assign assets greedily by scenario-weighted expected net strategic value."""
+        sorted_locs = sorted(
+            locations,
+            key=lambda loc: -self._effective_value(loc, scenarios),
+        )
+        capacity_remaining = {loc.location_id: loc.capacity for loc in sorted_locs}
+        assignment: Dict[str, str] = {}
+        for asset in assets:
+            for loc in sorted_locs:
+                if capacity_remaining[loc.location_id] > 0:
+                    assignment[asset.asset_id] = loc.location_id
+                    capacity_remaining[loc.location_id] -= 1
+                    break
+        return assignment

@@ -6,6 +6,8 @@ import math
 import random
 from typing import List
 
+from typing import Dict, Optional
+
 from .core import (
     Asset,
     AssetType,
@@ -16,6 +18,7 @@ from .core import (
     SLATarget,
     SustainmentAction,
     TelemetrySnapshot,
+    ThreatScenario,
 )
 
 THEATER_LOCATIONS: List[dict] = [
@@ -89,9 +92,17 @@ def make_posture_state(n_assets: int = 20, seed: int = 42) -> PostureState:
 
 
 def simulate_degradation(
-    state: PostureState, n_steps: int = 5, seed: int = 42
+    state: PostureState,
+    n_steps: int = 5,
+    seed: int = 42,
+    degradation_rate: Optional[float] = None,
 ) -> List[PostureState]:
-    """Simulate asset degradation + replenishment over time steps."""
+    """Simulate asset degradation + replenishment over time steps.
+
+    When degradation_rate is set, each asset loses exactly that fraction of
+    readiness per step (deterministic).  Otherwise a random draw in [0.05, 0.15]
+    is used per asset per step.
+    """
     rng = random.Random(seed)
     policy = ReplenishmentPolicy()
     history = []
@@ -99,8 +110,8 @@ def simulate_degradation(
     for step in range(n_steps):
         new_assets = []
         for asset in current.assets:
-            degradation = rng.uniform(0.05, 0.15)
-            new_readiness = max(0.0, asset.readiness_rate - degradation)
+            delta = degradation_rate if degradation_rate is not None else rng.uniform(0.05, 0.15)
+            new_readiness = max(0.0, asset.readiness_rate - delta)
             new_days = max(0, asset.maintenance_days_remaining - 1)
             a = Asset(
                 asset_id=asset.asset_id,
@@ -174,6 +185,59 @@ def make_telemetry_snapshot(seed: int = 42, load_factor: float = 0.5) -> Telemet
         cost_per_hour_usd=round(1.0 + load_factor * 8.0 + rng.uniform(-0.5, 0.5), 2),
         requests_per_second=round(load_factor * 500.0 + rng.uniform(-10.0, 10.0), 1),
     )
+
+
+def make_threat_scenarios(
+    locations: List[Location],
+    distribution: str = "uniform",
+    n_scenarios: int = 20,
+    weight_distribution: str = "uniform",
+    greedy_assignment: Optional[Dict[str, str]] = None,
+    seed: int = 42,
+) -> List[ThreatScenario]:
+    """Generate a set of threat scenarios for posture experiments.
+
+    distribution:
+      "uniform"     -- low, roughly equal threat across all locations
+      "skewed"      -- high-strategic-value locations face proportionally more threat
+      "adversarial" -- threat concentrates on locations chosen by greedy placement
+
+    weight_distribution:
+      "uniform" -- all scenarios have equal weight
+      "peaked"  -- exponentially varied weights so a subset of scenarios dominate
+
+    greedy_assignment maps asset_id -> location_id and is required for "adversarial".
+    """
+    rng = random.Random(seed)
+    sv = {loc.location_id: loc.strategic_value for loc in locations}
+
+    scenarios: List[ThreatScenario] = []
+    for i in range(n_scenarios):
+        threat: Dict[str, float] = {}
+        for loc in locations:
+            lid = loc.location_id
+            if distribution == "uniform":
+                threat[lid] = rng.uniform(0.10, 0.30)
+            elif distribution == "skewed":
+                # High-value locations bear more threat
+                threat[lid] = min(0.90, sv[lid] * rng.uniform(0.5, 1.0))
+            elif distribution == "adversarial":
+                chosen = set(greedy_assignment.values()) if greedy_assignment else set()
+                if lid in chosen:
+                    threat[lid] = rng.uniform(0.50, 0.90)
+                else:
+                    threat[lid] = rng.uniform(0.00, 0.20)
+            else:
+                threat[lid] = 0.0
+
+        weight = math.exp(rng.uniform(0.0, 3.0)) if weight_distribution == "peaked" else 1.0
+        scenarios.append(ThreatScenario(
+            scenario_id=f"S{i:04d}",
+            threat_levels=threat,
+            weight=weight,
+        ))
+
+    return scenarios
 
 
 def make_telemetry_series(
