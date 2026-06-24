@@ -1,0 +1,23 @@
+\begin{table}[htbp]
+\centering
+\caption{Statistical significance and variance decomposition at $t = 10$. \textbf{Top}: paired $t$-tests (two-tailed) comparing greedy vs.\ random on each metric, and uniform vs.\ skewed SWR. Bonferroni-corrected $\alpha^* = 0.0083$ (6 comparisons). $^{{*}}$ denotes $p < \alpha^*$. $^{{\dagger}}$ metric is placement-invariant (zero variance in paired differences). \textbf{Bottom}: two-level variance decomposition of SWR (5 scenario seeds $\times$ 10 simulation seeds). ICC near 0 = initial-state randomness dominates; ICC near 1 = scenario-set choice dominates.}
+\label{tab:exp1_significance}
+\begin{tabular}{lcccc}
+\hline
+Metric & Mean diff. & $t$-stat & $p$-value \\
+\hline
+        Readiness (greedy vs.\ random) & +0.0000 & \multicolumn{2}{c}{n/a$^{\dagger}$} \\
+        Coverage (greedy vs.\ random) & -0.2000 & $-\infty$ & $<$0.0001$^{*}$ \\
+        Sustainment cost (greedy vs.\ random) & +0.0000 & \multicolumn{2}{c}{n/a$^{\dagger}$} \\
+        Posture efficiency (greedy vs.\ random) & -0.0555 & -18.571 & $<$0.0001$^{*}$ \\
+        SWR: uniform vs.\ skewed threat & +0.2610 & +45.696 & $<$0.0001$^{*}$ \\
+\hline
+\multicolumn{5}{l}{\textit{Variance decomposition of SWR}} \\
+\hline
+Condition & Outer var. & Inner var. & Total var. & ICC \\
+\hline
+        Uniform threat & 0.00001 & 0.00106 & 0.00098 & 0.009 \\
+        Skewed threat & 0.00005 & 0.00023 & 0.00025 & 0.167 \\
+\hline
+\end{tabular}
+\end{table}

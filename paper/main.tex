@@ -1,0 +1,333 @@
+\documentclass[11pt]{article}
+
+% ---- Packages ----
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{setspace}
+\onehalfspacing
+
+% Point LaTeX at the figures folder so \includegraphics needs no path prefix
+\graphicspath{{figures/}}
+
+% ---- Document ----
+\begin{document}
+
+\title{Posture and Sustainment Optimization Under Adversarial Uncertainty}
+\author{}
+\date{}
+\maketitle
+
+\tableofcontents
+\newpage
+
+% =========================================================
+% SECTION: Experiment 1 — Greedy Baseline Characterization
+% =========================================================
+
+\section{Experiment 1: Greedy Baseline Characterization}
+\label{sec:exp1}
+
+\subsection{Motivation}
+
+Before evaluating scenario-weighted stochastic optimizers, it is necessary
+to establish what a myopic, value-maximizing greedy strategy achieves and,
+critically, where it fails. A greedy placement policy constitutes the
+expected-value benchmark against which the Composite Expected Value (CEV)
+optimizer is measured in Experiment~2. This section characterizes greedy
+performance across four posture metrics over a 10-step sustainment horizon,
+then quantifies its structural vulnerability to non-uniform threat
+distributions---the gap whose elimination motivates distributionally robust
+optimization.
+
+%------------------------------------------------------------
+\subsection{Experimental Setup}
+\label{sec:exp1:setup}
+
+The simulation environment consists of $|\mathcal{A}| = 20$ assets distributed
+across $|\mathcal{L}| = 5$ named theater locations drawn from
+Indo-Pacific basing sites (Kadena AB, Andersen AFB, MCAS Iwakuni,
+Camp H.M.\ Smith, and Diego Garcia), each with a per-location capacity
+of $c = 5$ and a pre-assigned strategic value
+$v_\ell \in [0.78,\, 0.95]$.
+Asset types are drawn uniformly from five categories (aircraft, fuel depots,
+maintenance crews, munitions, and medical assets), with initial readiness
+rates sampled from $\mathcal{U}(0.4, 1.0)$ and maintenance windows
+from $\mathcal{U}(1, 90)$ days.
+
+A fixed per-step degradation rate $\delta = 0.08$ is applied to every
+asset at each of $T = 10$ discrete time steps, replacing the stochastic
+degradation draws used in general simulation to isolate the effect of the
+placement and sustainment policy from noise. All results are averaged over
+$N_\mathrm{seed} = 10$ independent random seeds, with standard deviations
+reported throughout.
+
+%------------------------------------------------------------
+\subsection{Greedy Placement Algorithm}
+\label{sec:exp1:algorithm}
+
+The greedy placement policy $\pi_G$ assigns assets sequentially to the
+highest-value location with remaining capacity:
+\begin{equation}
+    \pi_G(a) = \operatorname*{arg\,max}_{\ell \in \mathcal{L}}
+    \; v_\ell
+    \quad \text{subject to } |\{a' : \pi_G(a') = \ell\}| < c.
+    \label{eq:greedy}
+\end{equation}
+Assets are processed in the order they appear in the initial state. Because
+all five locations share the same capacity $c = 5$, and 20 assets exactly
+fill four locations, $\pi_G$ deterministically assigns assets to the four
+highest-value locations $\{\ell_1, \ldots, \ell_4\}$ and leaves the
+lowest-value location $\ell_5$ (Diego Garcia, $v_{\ell_5} = 0.78$) empty.
+This is a direct consequence of greedy's myopic value-maximization: it has
+no coverage constraint.
+
+Between time steps, sustainment actions are determined by a
+\emph{ReplenishmentPolicy} $\pi_R$ that inspects each asset independently:
+\begin{equation}
+    \pi_R(a) =
+    \begin{cases}
+        \textsc{Maintain}  & \text{if } r_a < 0.4 \text{ or } d_a < 7, \\
+        \textsc{Resupply}  & \text{if } q_a < 2, \\
+        \textsc{Hold}      & \text{otherwise,}
+    \end{cases}
+    \label{eq:policy}
+\end{equation}
+where $r_a \in [0,1]$ is the readiness rate, $d_a$ is days until next
+scheduled maintenance, and $q_a$ is asset quantity.
+\textsc{Maintain} restores $r_a \leftarrow \min(1, r_a + 0.20)$;
+\textsc{Resupply} increments $q_a \leftarrow q_a + 2$.
+The per-action sustainment costs are
+$\kappa(\textsc{Reposition}) = 10$,
+$\kappa(\textsc{Resupply}) = 5$,
+$\kappa(\textsc{Maintain}) = 2$, and
+$\kappa(\textsc{Hold}) = 0$.
+
+%------------------------------------------------------------
+\subsection{Performance Metrics}
+\label{sec:exp1:metrics}
+
+Four metrics are computed at each time step.
+
+\paragraph{Readiness Score ($R$).}
+Quantity-weighted mean readiness across all assets:
+\begin{equation}
+    R = \frac{\sum_{a \in \mathcal{A}} q_a \, r_a}{\sum_{a \in \mathcal{A}} q_a}.
+    \label{eq:readiness}
+\end{equation}
+
+\paragraph{Coverage Score ($C$).}
+Fraction of locations occupied by at least one asset:
+\begin{equation}
+    C = \frac{|\{\ell \in \mathcal{L} : \exists\, a,\, \pi(a) = \ell\}|}{|\mathcal{L}|}.
+    \label{eq:coverage}
+\end{equation}
+
+\paragraph{Sustainment Cost ($K$).}
+Total action cost incurred by the ReplenishmentPolicy at a given step:
+\begin{equation}
+    K = \sum_{a \in \mathcal{A}} \kappa\!\left(\pi_R(a)\right).
+    \label{eq:cost}
+\end{equation}
+
+\paragraph{Posture Efficiency ($E$).}
+A composite metric that rewards joint readiness--coverage while penalizing
+cost superlinearly:
+\begin{equation}
+    E = \frac{R \cdot C}{\log(K + 2)}.
+    \label{eq:efficiency}
+\end{equation}
+The logarithmic cost penalty reflects diminishing marginal returns to
+sustainment spending.
+
+\paragraph{Scenario-Weighted Readiness (SWR).}
+To quantify threat-environment sensitivity, we evaluate greedy postures
+against a set of $S = 20$ independently drawn threat scenarios. Each
+scenario $s$ assigns a threat level $\tau_\ell^{(s)} \in [0,1]$ to every
+location, reducing the effective readiness of any asset stationed there.
+The SWR is the probability-weighted expected effective readiness:
+\begin{equation}
+    \mathrm{SWR} = \sum_{s=1}^{S} \frac{w_s}{\sum_{s'} w_{s'}}
+    \cdot \frac{\sum_{a \in \mathcal{A}} q_a \, r_a
+    \left(1 - \tau_{\pi(a)}^{(s)}\right)}{\sum_{a \in \mathcal{A}} q_a},
+    \label{eq:swr}
+\end{equation}
+where $w_s = 1$ for all $s$ (uniform weighting).
+Two threat distributions are evaluated:
+\begin{itemize}
+    \item \textbf{Uniform}: $\tau_\ell^{(s)} \sim \mathcal{U}(0.10, 0.30)$
+          for all $\ell$---a low-intensity, operationally symmetric threat
+          environment.
+    \item \textbf{Skewed}: $\tau_\ell^{(s)} = \min\!\left(0.9,\;
+          v_\ell \cdot \mathcal{U}(0.50, 1.00)\right)$---threat intensity
+          scales with strategic value, modeling an adversary that preferentially
+          targets the most valuable basing locations.
+\end{itemize}
+All scenario draws are fixed by a common seed across simulation runs so
+that observed variance reflects initial-state heterogeneity, not
+scenario sampling.
+
+%------------------------------------------------------------
+\subsection{Results}
+\label{sec:exp1:results}
+
+\subsubsection{Per-Step Metrics}
+
+Table~\ref{tab:exp1_metrics} reports the four metrics over all 10 time
+steps. Several features merit attention.
+
+\begin{itemize}
+    \item \textbf{Readiness declines then stabilizes.} $R$ falls from
+    $0.712 \pm 0.057$ at $t = 0$ to a trough near $0.553$ at $t = 5$--$6$,
+    then partially recovers to $0.570 \pm 0.041$ at $t = 10$ as the
+    ReplenishmentPolicy's \textsc{Maintain} actions restore degraded assets.
+    The stabilization reflects an equilibrium between the fixed $\delta = 0.08$
+    degradation rate and the $+0.20$ readiness gain from \textsc{Maintain}.
+
+    \item \textbf{Coverage is constant at 0.80.} Greedy's deterministic
+    assignment to the four highest-value locations fixes $C = 4/5 = 0.80$
+    throughout the simulation. The fifth location remains unoccupied at
+    every time step.
+
+    \item \textbf{Sustainment cost exhibits a large initial surge.}
+    $K = 13.1 \pm 6.0$ at $t = 0$, reflecting widespread maintenance
+    and resupply needs in the initial asset population (low maintenance
+    windows, low quantities). Cost drops sharply to $3.4 \pm 1.9$ by
+    $t = 2$ as immediate needs are addressed, then rises gradually to
+    $6.8 \pm 3.2$ by $t = 10$ as ongoing degradation generates a
+    steady maintenance demand.
+
+    \item \textbf{Posture efficiency peaks early then decays.}
+    $E$ rises sharply from $0.221$ at $t = 0$ to $0.344$ at $t = 1$
+    as the initial cost surge subsides, then declines monotonically
+    to $0.222$ by $t = 10$ as readiness erodes and cost accumulates.
+    The return to near-$t_0$ efficiency by $t = 10$ indicates that
+    greedy reaches a long-run steady state.
+\end{itemize}
+
+\input{tables/exp1_metrics}
+
+\subsubsection{Comparison with Random Placement}
+
+To contextualize greedy's performance, we compare it against a random
+placement baseline that assigns assets uniformly at random subject to the
+same capacity constraint, followed by the same ReplenishmentPolicy.
+Figure~\ref{fig:exp1_main} (panels a--b) shows the trajectories for both
+strategies across all 10 seeds.
+
+Readiness is \emph{placement-independent}: both greedy and random converge
+to $R = 0.570 \pm 0.041$ by $t = 10$ (panel~a). The ReplenishmentPolicy
+applies identically regardless of geographic assignment, so asset readiness
+is governed solely by the degradation--repair equilibrium. The two lines
+overlap throughout, confirming that value-based greedy placement confers
+no readiness advantage over random assignment.
+
+Posture efficiency tells a different story (panel~b). Random placement
+achieves $E = 0.278 \pm 0.047$ at $t = 10$, versus $E = 0.222 \pm 0.038$
+for greedy---a \textbf{25.1\% gap}. The sole driver is coverage: random
+assignment distributes assets across all five locations ($C = 1.00$),
+while greedy concentrates assets at four ($C = 0.80$). Given identical
+readiness and cost, Equation~\eqref{eq:efficiency} yields a coverage
+ratio of $1.00 / 0.80 = 1.25$, fully accounting for the observed
+efficiency gap. This result exposes a fundamental limitation of value-only
+greedy placement: by ignoring geographic coverage, it sacrifices composite
+operational efficiency despite maintaining strong local asset readiness.
+
+\subsubsection{Threat-Environment Sensitivity}
+
+Table~\ref{tab:exp1_sensitivity} and Figure~\ref{fig:exp1_main} (panel~c)
+report SWR under uniform and skewed threat distributions. The results
+reveal a structural vulnerability of greedy placement.
+
+Under \textbf{uniform threat}, SWR declines from $0.568 \pm 0.046$ at
+$t = 0$ to $0.455 \pm 0.032$ at $t = 10$---a 20.2\% reduction from
+nominal readiness. This modest degradation reflects the low mean threat
+level ($\mathbb{E}[\tau] = 0.20$) under the uniform distribution, which
+reduces effective readiness by a corresponding fraction regardless of
+where assets are placed.
+
+Under the \textbf{skewed distribution}, SWR collapses to
+$0.243 \pm 0.020$ at $t = 0$ and $0.194 \pm 0.015$ at $t = 10$---a
+65.9\% reduction from nominal, or a 57.3\% drop relative to the
+uniform-threat SWR. This gap is \emph{not a statistical artifact}: it
+remains constant at $57.3\%$ across all 10 time steps and all 10 random
+seeds (Table~\ref{tab:exp1_sensitivity}, \% Drop column).
+
+The constancy has a structural explanation. Because the threat scenarios
+are fixed and greedy \emph{always} assigns assets to the same four
+highest-value locations $\{\ell_1, \ldots, \ell_4\}$, the SWR ratio
+between conditions is determined entirely by the ratio of expected
+survival rates at those locations:
+\begin{equation}
+    \frac{\mathrm{SWR}_\mathrm{skewed}}{\mathrm{SWR}_\mathrm{uniform}}
+    \approx
+    \frac{\frac{1}{4}\sum_{i=1}^{4}
+          \mathbb{E}\!\left[1 - \tau_{\ell_i}^{(s)}\right]_\mathrm{skewed}}
+         {\mathbb{E}\!\left[1 - \tau^{(s)}\right]_\mathrm{uniform}}
+    = \frac{0.344}{0.800} \approx 0.43,
+    \label{eq:structural_gap}
+\end{equation}
+yielding a fixed 57\% drop. Under the skewed distribution, an adversary
+that targets high-strategic-value bases finds that \emph{all} greedy assets
+are concentrated precisely at the locations facing the greatest threat.
+Greedy placement, by optimizing for peacetime strategic value, maximally
+exposes assets to value-correlated adversarial threats.
+
+\input{tables/exp1_sensitivity}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{exp1_main}
+    \caption{Greedy baseline characterization over 10 time steps
+             ($N_\mathrm{seed} = 10$, $\delta = 0.08$, capacity $= 5$).
+             Shaded bands show $\pm 1\sigma$.
+             \textbf{(a)}~Readiness score: greedy and random placement
+             converge to identical readiness by $t = 5$, confirming
+             placement-invariance under the ReplenishmentPolicy.
+             \textbf{(b)}~Posture efficiency: random placement consistently
+             outperforms greedy by 25\% due to full geographic coverage
+             ($C = 1.00$ vs.\ $C = 0.80$).
+             \textbf{(c)}~Scenario-weighted readiness (SWR) under uniform
+             vs.\ skewed threat: the 57.3\% gap between conditions is
+             constant across all time steps, reflecting a structural
+             vulnerability of greedy placement to value-correlated
+             adversarial threats.}
+    \label{fig:exp1_main}
+\end{figure}
+
+%------------------------------------------------------------
+\subsection{Discussion}
+\label{sec:exp1:discussion}
+
+Experiment~1 yields three findings that collectively motivate the
+scenario-weighted optimizer evaluated in Experiment~2.
+
+\paragraph{Finding 1: Readiness is placement-invariant under rule-based sustainment.}
+The ReplenishmentPolicy equalizes readiness across placement strategies by
+step 10. This means greedy's advantage over random is not readiness but
+other posture qualities---and in fact greedy underperforms random on the
+composite efficiency metric. Any optimizer that claims readiness improvements
+over greedy must do so through sustainment policy changes, not placement alone.
+
+\paragraph{Finding 2: Greedy sacrifices geographic coverage for value concentration.}
+With capacity $c = 5$ and $|\mathcal{A}| = 20$ assets, greedy leaves one
+location persistently uncovered, incurring a permanent 25\% posture
+efficiency penalty. This is not a boundary artifact: for any configuration
+where $|\mathcal{A}|$ is not a multiple of $|\mathcal{L}| \cdot c$,
+greedy will under-cover lower-value locations. A stochastic optimizer that
+accounts for coverage through threat scenario diversity can exploit this gap.
+
+\paragraph{Finding 3: Greedy placement creates a structurally fixed threat vulnerability.}
+The 57.3\% SWR degradation under skewed threat is not reducible through
+better sustainment---it is a geometric consequence of where assets are placed.
+The vulnerability is invariant to seed, time step, and readiness level, meaning
+it cannot be repaired reactively; it must be anticipated at the placement stage.
+This finding directly motivates the key research question in Issue~\#10 (Q1):
+an optimizer that is aware of threat distribution heterogeneity at planning
+time should be able to trade some value concentration for threat-robustness,
+capturing positive EVSS (Expected Value of the Stochastic Solution)
+over greedy.
+
+\end{document}

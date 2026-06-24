@@ -12,6 +12,7 @@ from .core import (
     SLATarget,
     SustainmentAction,
     TelemetrySnapshot,
+    ThreatScenario,
     estimated_hourly_cost,
     estimated_latency_ms,
     resource_utilization_score,
@@ -187,3 +188,44 @@ def pareto_efficient_profiles(
             if cj <= ci and lj <= li and (cj < ci or lj < li):
                 dominated.add(i)
     return [p for idx, p in enumerate(profiles) if idx not in dominated]
+
+
+# ---------------------------------------------------------------------------
+# Stochastic optimization metrics (Experiments 1 & 2)
+# ---------------------------------------------------------------------------
+
+
+def scenario_weighted_readiness(
+    assets: List[Asset],
+    scenarios: List[ThreatScenario],
+) -> float:
+    """Expected readiness across threat scenarios.
+
+    For each scenario, each asset's effective readiness is readiness_rate
+    multiplied by (1 - threat_level at its location).  Returns the
+    probability-weighted mean across scenarios.
+    """
+    if not scenarios or not assets:
+        return 0.0
+    total_weight = sum(s.weight for s in scenarios)
+    if total_weight == 0:
+        return 0.0
+    total_qty = sum(a.quantity for a in assets)
+    if total_qty == 0:
+        return 0.0
+    expected_r = 0.0
+    for s in scenarios:
+        scenario_r = sum(
+            a.readiness_rate * (1.0 - s.threat_levels.get(a.location_id, 0.0)) * a.quantity
+            for a in assets
+        ) / total_qty
+        expected_r += (s.weight / total_weight) * scenario_r
+    return expected_r
+
+
+def evss(cev_readiness: float, greedy_readiness: float) -> float:
+    """Expected Value of the Stochastic Solution (EVSS = CEV - greedy).
+
+    Positive values indicate the scenario-weighted optimizer outperforms greedy.
+    """
+    return cev_readiness - greedy_readiness
