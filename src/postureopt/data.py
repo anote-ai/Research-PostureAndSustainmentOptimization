@@ -240,6 +240,70 @@ def make_threat_scenarios(
     return scenarios
 
 
+def make_scaled_theater(
+    n_assets: int,
+    n_locations: int,
+    seed: int = 42,
+) -> PostureState:
+    """Generate a theater instance with parameterised asset and location counts.
+
+    Used by Experiment 4 scalability sweep to vary M and N independently.
+    """
+    rng = random.Random(seed)
+    locations = [make_location(i) for i in range(n_locations)]
+    asset_types = list(AssetType)
+    assets = [
+        Asset(
+            asset_id=f"A{i:04d}",
+            asset_type=rng.choice(asset_types),
+            location_id=rng.choice(locations).location_id,
+            quantity=rng.randint(1, 5),
+            readiness_rate=round(rng.uniform(0.5, 1.0), 3),
+            maintenance_days_remaining=rng.randint(10, 90),
+        )
+        for i in range(n_assets)
+    ]
+    return PostureState(assets=assets, locations=locations, time_step=0)
+
+
+def make_robustness_scenarios(
+    locations: List[Location],
+    epsilon: float,
+    n_scenarios: int = 20,
+    seed: int = 42,
+) -> List[ThreatScenario]:
+    """Generate scenarios that simulate a Wasserstein ball of radius epsilon.
+
+    epsilon=0.0: uniform low threat on all locations (expected-value baseline).
+    epsilon=1.0: peaked weight on scenarios concentrating threat on high-value locations.
+
+    Each scenario's weight is 1 + epsilon * adversarial_score, where
+    adversarial_score is proportional to the strategic value of the most-threatened
+    location in that scenario. This linearly blends from flat (EV) to adversarially-
+    peaked weights as epsilon increases, approximating expanding the ambiguity set.
+    """
+    rng = random.Random(seed)
+    sv = {loc.location_id: loc.strategic_value for loc in locations}
+    scenarios: List[ThreatScenario] = []
+    for i in range(n_scenarios):
+        threat: Dict[str, float] = {}
+        for loc in locations:
+            # Mix low base threat with high adversarial threat, scaled by epsilon
+            base = rng.uniform(0.05, 0.20)
+            adv  = sv[loc.location_id] * rng.uniform(0.6, 1.0)
+            threat[loc.location_id] = min(1.0, (1.0 - epsilon) * base + epsilon * adv)
+        # Weight = 1 + epsilon * (mean threat on high-value locations)
+        high_val_threat = max(threat.get(loc.location_id, 0.0) * sv[loc.location_id]
+                              for loc in locations)
+        weight = 1.0 + epsilon * high_val_threat
+        scenarios.append(ThreatScenario(
+            scenario_id=f"R{i:04d}",
+            threat_levels=threat,
+            weight=weight,
+        ))
+    return scenarios
+
+
 def make_telemetry_series(
     n_snapshots: int = 24,
     seed: int = 42,
