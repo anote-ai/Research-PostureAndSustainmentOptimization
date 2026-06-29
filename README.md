@@ -75,11 +75,48 @@ print(f"Readiness: {readiness_score(assets):.2f}")
 print(f"Coverage: {coverage_score(assets, locations):.2f}")
 ```
 
+## Running the Demo and Experiments
+
+A minimal end-to-end simulation demo:
+
+```bash
+python scripts/run_demo.py
+```
+
+This creates a 20-asset posture state, runs a 5-step degradation simulation, and prints a readiness summary.
+
+### Experiment scripts
+
+| Script | What it does | Status |
+|---|---|---|
+| `scripts/experiment1.py` | Greedy baseline characterization vs. random placement, plus threat-sensitivity analysis (uniform vs. skewed threat distributions) over 10 seeds. | **Run and measured.** Results captured in `results/tables/exp1_metrics.tex`, `exp1_sensitivity.tex`, `exp1_significance.tex`, and written up in `paper/main.tex` (Experiment 1). |
+| `scripts/experiment2.py` | Scenario-weighted optimizer (CEV) vs. greedy, sweeping threat distribution × scenario count × weight distribution, reporting Expected Value of the Stochastic Solution (EVSS). | Implemented and runnable, but **not yet executed with captured output** — no corresponding `results/tables/exp2_*` files exist yet. |
+| `scripts/experiment3.py` | Adversarially-robust optimizer (`RobustCEVOptimizer` + `AdversarialModel` in `src/postureopt/drsp.py`) vs. CEV and greedy, under a Bayesian counter-move adversary. | Implemented and runnable; **not yet executed with captured output**. |
+| `scripts/experiment4.py` | Distribution-shift / scaling sensitivity sweep. | Implemented and runnable; **not yet executed with captured output**. |
+
+To run any experiment script:
+
+```bash
+python scripts/experiment1.py   # prints tables to stdout; LaTeX exports already in results/tables
+python scripts/experiment2.py   # prints EVSS sweep to stdout — run this and save output to capture real results
+python scripts/experiment3.py
+python scripts/experiment4.py
+```
+
+Note: `DESIGN_DOC.md` describes a larger planned benchmark ("SustainBench", 200 scenarios, DRSP vs. SAA vs. RL recourse policies). That larger benchmark, its solver stack (Gurobi/CPLEX), and its RL recourse training loop are **not yet implemented** in this repository — see `PAPER_DRAFT.md` for a detailed breakdown of what is implemented/measured vs. planned.
+
 ## Running Tests
 
 ```bash
 pytest tests/ -v --cov=src --cov-report=term-missing
 ```
+
+## Further Reading
+
+- `DESIGN_DOC.md` — original research vision and planned experiments.
+- `PAPER_DRAFT.md` — paper skeleton distinguishing measured results from TBD/future work.
+- `BLOG.md` — accessible, non-academic summary of the findings so far.
+- `paper/main.tex` — current LaTeX writeup (Experiment 1).
 
 ## Government Use Disclaimer
 
