@@ -105,11 +105,21 @@ def _apply(assets, assignment):
 
 
 def _run_all_baselines(assets, locs, train_scenarios, oos_scenarios, seed):
-    """Return dict: baseline -> (worst_case_swr, latency_ms)."""
+    """Return dict: baseline -> (worst_case_swr, latency_ms).
+
+    EV  = single scenario at mean threat level (deterministic expected-value).
+    SAA = all training scenarios, uniform weights (sample average approximation).
+    """
     adversary = AdversarialModel(p_obs=0.7, rationality=1.0)
-    ev_scenarios = [ThreatScenario(s.scenario_id, s.threat_levels, weight=1.0)
-                    for s in train_scenarios]
-    saa_scenarios = train_scenarios  # same structure, SAA uses full set
+
+    # EV: single mean-threat scenario — the true deterministic baseline
+    loc_ids = list(train_scenarios[0].threat_levels.keys()) if train_scenarios else []
+    mean_threats = {
+        lid: float(np.mean([s.threat_levels.get(lid, 0.0) for s in train_scenarios]))
+        for lid in loc_ids
+    }
+    ev_scenarios = [ThreatScenario("EV_mean", mean_threats, weight=1.0)]
+    saa_scenarios = train_scenarios  # SAA uses full scenario set
 
     results = {}
 
@@ -121,7 +131,7 @@ def _run_all_baselines(assets, locs, train_scenarios, oos_scenarios, seed):
         scenario_weighted_readiness(_apply(assets, g_assign), oos_scenarios), lat_g
     )
 
-    # EV (ScenarioWeightedOptimizer, uniform weight = expected value)
+    # EV (single mean-threat scenario)
     t0 = time.perf_counter()
     ev_assign = ScenarioWeightedOptimizer(seed=seed).optimize_placement(
         assets, locs, ev_scenarios
@@ -131,7 +141,7 @@ def _run_all_baselines(assets, locs, train_scenarios, oos_scenarios, seed):
         scenario_weighted_readiness(_apply(assets, ev_assign), oos_scenarios), lat_ev
     )
 
-    # SAA (ScenarioWeightedOptimizer with ε-blended scenarios)
+    # SAA (ScenarioWeightedOptimizer with full scenario set)
     t0 = time.perf_counter()
     saa_assign = ScenarioWeightedOptimizer(seed=seed).optimize_placement(
         assets, locs, saa_scenarios
@@ -298,6 +308,8 @@ def run_a2ad_sweep():
     for radius in A2AD_RADII:
         swr_by_baseline: Dict[str, list] = {b: [] for b in BASELINES}
         cov_drso: list = []
+        cov_greedy: list = []
+        cov_ev: list = []
         for seed in range(N_SEEDS):
             state = make_indopacific_theater()
             # Training: A2/AD scenarios at this radius (defender sees current threat)
@@ -308,13 +320,22 @@ def run_a2ad_sweep():
             res = _run_all_baselines(state.assets, state.locations, train, oos, seed)
             for b in BASELINES:
                 swr_by_baseline[b].append(res[b][0])
-            # Contested zone coverage for DRSO
+            # Contested zone coverage: DRSO, Greedy, EV for comparison
             drso_assign, _ = RobustCEVOptimizer(
                 AdversarialModel(0.7, 1.0), seed=seed
             ).optimize_placement(state.assets, locs, train)
-            cov_drso.append(
-                contested_zone_coverage(drso_assign, locs, lat, lon, radius)
+            greedy_assign = PostureOptimizer(seed=seed).greedy_placement(state.assets, locs)
+            loc_ids = list(train[0].threat_levels.keys())
+            mean_threats = {
+                lid: float(np.mean([s.threat_levels.get(lid, 0.0) for s in train]))
+                for lid in loc_ids
+            }
+            ev_assign = ScenarioWeightedOptimizer(seed=seed).optimize_placement(
+                state.assets, locs, [ThreatScenario("EV_mean", mean_threats, weight=1.0)]
             )
+            cov_drso.append(contested_zone_coverage(drso_assign, locs, lat, lon, radius))
+            cov_greedy.append(contested_zone_coverage(greedy_assign, locs, lat, lon, radius))
+            cov_ev.append(contested_zone_coverage(ev_assign, locs, lat, lon, radius))
 
         # Count locations within radius
         n_contested = sum(
@@ -329,11 +350,14 @@ def run_a2ad_sweep():
             "radius": radius,
             "n_contested": n_contested,
             "contested_names": contested_names,
-            "cov_drso": float(np.mean(cov_drso)),
+            "cov_drso":   float(np.mean(cov_drso)),
+            "cov_greedy": float(np.mean(cov_greedy)),
+            "cov_ev":     float(np.mean(cov_ev)),
             **{f"swr_{b}": float(np.mean(swr_by_baseline[b])) for b in BASELINES},
         })
-        print(f"    radius={radius}km: {n_contested} locations contested, "
-              f"DRSO SWR={rows[-1]['swr_DRSO']:.4f}, coverage={rows[-1]['cov_drso']:.3f}")
+        print(f"    radius={radius}km: {n_contested} locs contested | "
+              f"DRSO SWR={rows[-1]['swr_DRSO']:.4f} cov={rows[-1]['cov_drso']:.3f} | "
+              f"Greedy cov={rows[-1]['cov_greedy']:.3f}")
     return rows
 
 
@@ -405,28 +429,44 @@ def make_a2ad_figure(a2ad_rows):
 
     radii = [r["radius"] for r in a2ad_rows]
 
+    # Left: SWR vs radius — show all baselines, widen y-axis for readability
     ax = axes[0]
     for b, col in zip(BASELINES, COLORS):
         ax.plot(radii, [r[f"swr_{b}"] for r in a2ad_rows],
                 color=col, marker="o", ms=4, label=b)
+    all_swr = [r[f"swr_{b}"] for r in a2ad_rows for b in BASELINES]
+    ymin, ymax = min(all_swr), max(all_swr)
+    pad = max((ymax - ymin) * 0.5, 0.005)
+    ax.set_ylim(ymin - pad, ymax + pad)
     ax.set_xlabel("A2/AD contested zone radius (km)")
     ax.set_ylabel("Worst-case SWR (out-of-sample)")
     ax.set_title("(a) Worst-case readiness vs. A2/AD radius")
     ax.legend(fontsize=8)
 
+    # Right: survivable coverage — DRSO vs Greedy vs EV
     ax = axes[1]
-    ax.plot(radii, [r["cov_drso"] for r in a2ad_rows],
+    ax.plot(radii, [r["cov_drso"]   for r in a2ad_rows],
             color=ORANGE, marker="s", ms=5, label="DRSO")
+    ax.plot(radii, [r["cov_greedy"] for r in a2ad_rows],
+            color=GRAY,   marker="^", ms=5, label="Greedy", ls="--")
+    ax.plot(radii, [r["cov_ev"]     for r in a2ad_rows],
+            color=BLUE,   marker="o", ms=5, label="EV", ls=":")
     ax.set_xlabel("A2/AD contested zone radius (km)")
     ax.set_ylabel("Survivable coverage (fraction outside zone)")
-    ax.set_title("(b) DRSO posture shift as A2/AD matures")
+    ax.set_title("(b) Posture shift as A2/AD matures")
+    # Annotate contested location count at each radius transition
+    prev = 0
     for r in a2ad_rows:
-        if r["n_contested"] > 0:
+        if r["n_contested"] != prev:
+            ax.axvline(r["radius"], color="black", ls=":", lw=0.8, alpha=0.4)
             ax.annotate(
-                f"{r['n_contested']} loc.", (r["radius"], r["cov_drso"]),
-                textcoords="offset points", xytext=(4, 4), fontsize=7,
+                f"{r['n_contested']} loc. in zone",
+                (r["radius"], 0.08), rotation=90,
+                fontsize=7, color="black", alpha=0.7,
+                va="bottom", ha="right",
             )
-    ax.set_ylim(0, 1.05)
+            prev = r["n_contested"]
+    ax.set_ylim(-0.05, 1.10)
     ax.legend(fontsize=8)
 
     return fig
@@ -511,10 +551,11 @@ def latex_a2ad_table(a2ad_rows):
     body = "\n".join(
         f"        {r['radius']}"
         f" & {r['n_contested']}"
-        f" & {', '.join(r['contested_names']) if r['contested_names'] else 'None'}"
         f" & {r['swr_DRSO']:.4f}"
         f" & {r['swr_EV']:.4f}"
-        f" & {r['cov_drso']:.3f} \\\\"
+        f" & {r['cov_drso']:.3f}"
+        f" & {r['cov_greedy']:.3f}"
+        f" & {r['cov_ev']:.3f} \\\\"
         for r in a2ad_rows
     )
     return (
@@ -522,12 +563,13 @@ def latex_a2ad_table(a2ad_rows):
         r"\centering" "\n"
         r"\caption{Experiment 5C: A2/AD contested zone radius sweep (Indo-Pacific). "
         r"Threat center at (30\textdegree N, 130\textdegree E). "
-        r"DRSO and EV worst-case SWR evaluated under radius-matched A2/AD scenarios. "
-        r"Coverage = fraction of DRSO assets placed outside contested zone.}" "\n"
+        r"SWR evaluated against fixed theater adversarial scenarios. "
+        r"Coverage = fraction of assets placed outside contested zone "
+        r"(higher is more survivable).}" "\n"
         r"\label{tab:exp5_a2ad}" "\n"
-        r"\begin{tabular}{cclccc}" "\n"
+        r"\begin{tabular}{cccccccc}" "\n"
         r"\hline" "\n"
-        r"Radius (km) & Contested locs & Locations in zone & DRSO SWR & EV SWR & Coverage \\" "\n"
+        r"Radius (km) & Locs. in zone & DRSO SWR & EV SWR & DRSO cov. & Greedy cov. & EV cov. \\" "\n"
         r"\hline" "\n"
         f"{body}\n"
         r"\hline" "\n"
