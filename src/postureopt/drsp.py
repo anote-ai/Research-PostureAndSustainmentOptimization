@@ -1,4 +1,5 @@
 """Adversarial Bayesian counter-move model and robust CEV optimizer (Experiment 3).
+MinimaxOptimizer added for Experiment 5 cross-baseline comparison.
 
 Builds on core.ThreatScenario (threat_levels / weight) and
 core.ScenarioWeightedOptimizer rather than duplicating them.
@@ -74,6 +75,44 @@ class AdversarialModel:
             )
             for s, adv_w in zip(scenarios, adv_weights)
         ]
+
+
+class MinimaxOptimizer:
+    """Minimax (worst-case) placement optimizer.
+
+    Ranks locations by the minimum effective strategic value across all scenarios.
+    Places greedily on this minimax ranking, maximising the guaranteed value
+    under the single worst scenario in the set.
+    """
+
+    def __init__(self, seed: int = 42) -> None:
+        self.seed = seed
+
+    def optimize_placement(
+        self,
+        assets: List[Asset],
+        locations: List[Location],
+        scenarios: List[ThreatScenario],
+    ) -> Dict[str, str]:
+        """Assign assets greedily by worst-case effective strategic value."""
+        def minimax_value(loc: Location) -> float:
+            if not scenarios:
+                return loc.strategic_value
+            return min(
+                loc.strategic_value * (1.0 - s.threat_levels.get(loc.location_id, 0.0))
+                for s in scenarios
+            )
+
+        sorted_locs = sorted(locations, key=lambda loc: -minimax_value(loc))
+        capacity_remaining = {loc.location_id: loc.capacity for loc in sorted_locs}
+        assignment: Dict[str, str] = {}
+        for asset in assets:
+            for loc in sorted_locs:
+                if capacity_remaining[loc.location_id] > 0:
+                    assignment[asset.asset_id] = loc.location_id
+                    capacity_remaining[loc.location_id] -= 1
+                    break
+        return assignment
 
 
 class RobustCEVOptimizer:
